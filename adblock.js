@@ -1,4 +1,7 @@
 "use strict";
+/**
+ * @author ririxi
+ */
 const loadWebpack = () => {
     try {
         const require = window.webpackChunkclient_web.push([[Symbol()], {}, (re) => re]);
@@ -52,22 +55,32 @@ const retryCounter = (slotId, action) => {
 (async function adblockify() {
     // @ts-expect-error: Events are not defined in types
     await new Promise(res => Spicetify.Events.platformLoaded.on(res));
-    if (!window.webpackChunkclient_web) {
-        setTimeout(adblockify, 50);
-        return;
-    }
+    // @ts-expect-error: Events are not defined in types
+    await new Promise(res => Spicetify.Events.webpackLoaded.on(res));
     const webpackCache = loadWebpack();
-    // @ts-expect-error: expFeatureOverride is not defined in types
-    const { CosmosAsync, Platform, expFeatureOverride, Locale } = Spicetify;
+    // @ts-expect-error: createInternalMap, RemoteConfigResolver is not defined in types
+    const { Platform, createInternalMap, Locale, RemoteConfigResolver } = Spicetify;
     const { AdManagers } = Platform;
-    const { audio } = AdManagers;
-    const { UserAPI } = Platform;
-    const productState = UserAPI._product_state || UserAPI._product_state_service || Platform?.ProductStateAPI?.productStateApi;
-    if (!CosmosAsync) {
+    if (!AdManagers?.audio || Object.keys(AdManagers).length === 0) {
         setTimeout(adblockify, 100);
         return;
     }
+    const { audio } = AdManagers;
+    const { UserAPI } = Platform;
+    const productState = UserAPI._product_state || UserAPI._product_state_service || Platform?.ProductStateAPI?.productStateApi;
+    if (!Spicetify?.CosmosAsync) {
+        setTimeout(adblockify, 100);
+        return;
+    }
+    const { CosmosAsync } = Spicetify;
     const slots = await CosmosAsync.get("sp://ads/v1/slots");
+    const hideAdLikeElements = () => {
+        const css = document.createElement("style");
+        const upgradeText = Locale.get("upgrade.tooltip.title");
+        css.className = "adblockify";
+        css.innerHTML = `.nHCJskDZVlmDhNNS9Ixv, .utUDWsORU96S7boXm2Aq, .cpBP3znf6dhHLA2dywjy, .G7JYBeU1c2QawLyFs5VK, .vYl1kgf1_R18FCmHgdw2, .vZkc6VwrFz0EjVBuHGmx, .iVAZDcTm1XGjxwKlQisz, ._I_1HMbDnNlNAaViEnbp, .xXj7eFQ8SoDKYXy6L3E1, .F68SsPm8lZFktQ1lWsQz, .MnW5SczTcbdFHxLZ_Z8j, .WiPggcPDzbwGxoxwLWFf, .ReyA3uE3K7oEz7PTTnAn, .x8e0kqJPS0bM4dVK7ESH, .gZ2Nla3mdRREDCwybK6X, .SChMe0Tert7lmc5jqH01, .AwF4EfqLOIJ2xO7CjHoX, .UlkNeRDFoia4UDWtrOr4, .k_RKSQxa2u5_6KmcOoSw, ._mWmycP_WIvMNQdKoAFb, .O3UuqEx6ibrxyOJIdpdg, .akCwgJVf4B4ep6KYwrk5, .bIA4qeTh_LSwQJuVxDzl, .ajr9pah2nj_5cXrAofU_, .gvn0k6QI7Yl_A0u46hKn, .obTnuSx7ZKIIY1_fwJhe, .IiLMLyxs074DwmEH4x5b, .RJjM91y1EBycwhT_wH59, .mxn5B5ceO2ksvMlI1bYz, .l8wtkGVi89_AsA3nXDSR, .Th1XPPdXMnxNCDrYsnwb, .SJMBltbXfqUiByDAkUN_, .Nayn_JfAUsSO0EFapLuY, .YqlFpeC9yMVhGmd84Gdo, .HksuyUyj1n3aTnB4nHLd, .DT8FJnRKoRVWo77CPQbQ, ._Cq69xKZBtHaaeMZXIdk, .main-leaderboardComponent-container, .sponsor-container, a.link-subtle.main-navBar-navBarLink.GKnnhbExo0U9l7Jz2rdc, button[title="${upgradeText}"], button[aria-label="${upgradeText}"], .main-topBar-UpgradeButton, .main-contextMenu-menuItem a[href^="https://www.spotify.com/premium/"], div[data-testid*="hpto"] {display: none !important;}`;
+        document.head.appendChild(css);
+    };
     const disableAds = async () => {
         try {
             await productState.putOverridesValues({ pairs: { ads: "0", catalogue: "premium", product: "premium", type: "premium" } });
@@ -78,15 +91,17 @@ const retryCounter = (slotId, action) => {
     };
     const configureAdManagers = async () => {
         try {
-            const { billboard, leaderboard, inStreamApi, sponsoredPlaylist } = AdManagers;
-            audio.audioApi.cosmosConnector.increaseStreamTime(-100000000000);
-            billboard.billboardApi.cosmosConnector.increaseStreamTime(-100000000000);
+            const { billboard, leaderboard, sponsoredPlaylist } = AdManagers;
+            await CosmosAsync.post("sp://ads/v1/testing/playtime", { value: -100000000000 });
             await audio.disable();
             audio.isNewAdsNpvEnabled = false;
             await billboard.disable();
             await leaderboard.disableLeaderboard();
-            await inStreamApi.disable();
             await sponsoredPlaylist.disable();
+            if (AdManagers?.inStreamApi) {
+                const { inStreamApi } = AdManagers;
+                await inStreamApi.disable();
+            }
             if (AdManagers?.vto) {
                 const { vto } = AdManagers;
                 await vto.manager.disable();
@@ -101,13 +116,13 @@ const retryCounter = (slotId, action) => {
     const bindToSlots = async () => {
         for (const slot of slots) {
             subToSlot(slot.slot_id);
-            handleAdSlot({ adSlotEvent: { slotId: slot.slot_id } });
+            setTimeout(() => handleAdSlot({ adSlotEvent: { slotId: slot.slot_id } }), 50);
         }
     };
     const handleAdSlot = (data) => {
         const slotId = data?.adSlotEvent?.slotId;
         try {
-            const adsCoreConnector = audio.inStreamApi.adsCoreConnector;
+            const adsCoreConnector = audio?.inStreamApi?.adsCoreConnector;
             if (typeof adsCoreConnector?.clearSlot === "function")
                 adsCoreConnector.clearSlot(slotId);
             const slotsClient = getSlotsClient(webpackCache.functionModules, productState.transport);
@@ -132,6 +147,7 @@ const retryCounter = (slotId, action) => {
             const settingsClient = getSettingsClient(webpackCache.cache);
             if (!settingsClient)
                 return;
+            await settingsClient.updateAdServerEndpoint({ slotIds: [slotId], url: "http://localhost/no/thanks" });
             await settingsClient.updateStreamTimeInterval({ slotId, timeInterval: "0" });
             await settingsClient.updateSlotEnabled({ slotId, enabled: false });
             await settingsClient.updateDisplayTimeInterval({ slotId, timeInterval: "0" });
@@ -182,25 +198,34 @@ const retryCounter = (slotId, action) => {
     const enableExperimentalFeatures = async () => {
         try {
             const expFeatures = JSON.parse(localStorage.getItem("spicetify-exp-features") || "{}");
-            const hptoEsperanto = expFeatures.enableEsperantoMigration?.value;
-            const inAppMessages = expFeatures.enableInAppMessaging?.value;
-            const upgradeCTA = expFeatures.hideUpgradeCTA?.value;
-            if (!hptoEsperanto)
-                expFeatureOverride({ type: "bool", name: "enableEsperantoMigration", default: true });
-            if (inAppMessages)
-                expFeatureOverride({ type: "bool", name: "enableInAppMessaging", default: false });
-            if (!upgradeCTA)
-                expFeatureOverride({ type: "bool", name: "hideUpgradeCTA", default: true });
+            if (typeof expFeatures?.enableEsperantoMigration?.value !== "undefined")
+                expFeatures.enableEsperantoMigration.value = true;
+            if (typeof expFeatures?.enableInAppMessaging?.value !== "undefined")
+                expFeatures.enableInAppMessaging.value = false;
+            if (typeof expFeatures?.hideUpgradeCTA?.value !== "undefined")
+                expFeatures.hideUpgradeCTA.value = true;
+            // if (typeof expFeatures?.enableSmartShuffle?.value !== "undefined") expFeatures.enableSmartShuffle.value = false;
+            localStorage.setItem("spicetify-exp-features", JSON.stringify(expFeatures));
+            const overrides = {
+                enableEsperantoMigration: true,
+                enableInAppMessaging: false,
+                hideUpgradeCTA: true,
+                //enableSmartShuffle: false,
+            };
+            const map = createInternalMap(overrides);
+            RemoteConfigResolver.value.setOverrides(map);
         }
         catch (error) {
             console.error("adblockify: Failed inside `enableExperimentalFeatures` function\n", error);
         }
     };
-    enableExperimentalFeatures();
     bindToSlots();
+    hideAdLikeElements();
     // to enable one day if disabling `enableInAppMessages` exp feature doesn't work
     //runObserver();
     productState.subValues({ keys: ["ads", "catalogue", "product", "type"] }, () => configureAdManagers());
+    enableExperimentalFeatures();
+    setTimeout(enableExperimentalFeatures, 3 * 1000);
     // Update slot settings after 5 seconds... idk why, don't ask me why, it just works
     setTimeout(intervalUpdateSlotSettings, 5 * 1000);
 })();
